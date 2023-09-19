@@ -31,5 +31,5 @@ Extract NAudio-1.8.0-Release.zip and copy NAudio.dll into the newly created "Plu
 2️⃣ Select your desired radio station from the list
 3️⃣ Click the "Play" button to start streaming 🎶
 
-For advanced usage or adding more stations, consult the project documentation.
+
 
