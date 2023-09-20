@@ -1,7 +1,7 @@
 # 📻 Internet Radio Streaming in Unity with NAudio Library 🎵
 
 ## 🌐 Overview
-Stream popular internet radio stations like SofaFM and DEF CON right in Unity. Built on Unity version 2021.3.30f1. This project opted for NAudio due to limitations with Unity's native WWW/MediaRequests for streaming.
+Stream popular internet radio stations like SomaFM right in Unity. Built on Unity version 2021.3.30f1. This project opted for NAudio due to limitations with Unity's native WWW/MediaRequests for streaming.
 
 ---
 
