@@ -35,6 +35,8 @@ Tested on Windows and WSL2. Not entirely sure about native macOS or Linux Unity 
 
 Adding more stations: add the URL and name to the `_urls` and `_stationNames` arrays in `RadioManager.cs`. URLs ending in `.m3u8` are routed to the HLS path automatically; everything else goes through the Icecast path.
 
+For a large collection of stream URLs to try, check out [mikepierce/internet-radio-streams](https://github.com/mikepierce/internet-radio-streams).
+
 > **HLS note:** HE-AAC streams (typically 64k) are not supported, use 128k or higher (AAC-LC). SharpJaad cannot decode HE-AAC.
 
 ---
