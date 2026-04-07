@@ -85,3 +85,6 @@ Assets/Plugins/SharpJaad.AAC.dll.meta
 
 # UnityPlugins build output
 UnityPlugins/obj/
+
+# IDE
+.vscode/
