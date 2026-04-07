@@ -1,0 +1,17 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="NLayer"           Version="1.16.0" />
+    <PackageReference Include="SharpJaad"        Version="0.1.1"  />
+    <PackageReference Include="SharpJaad.AAC"    Version="0.1.1"  />
+    <PackageReference Include="System.IO.Pipelines" Version="10.0.5" />
+  </ItemGroup>
+
+</Project>
