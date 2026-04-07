@@ -1,0 +1,32 @@
+name: Build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Build StreamTester
+        run: dotnet build StreamTester/StreamTester.csproj
+
+      - name: Fetch Unity plugins
+        run: dotnet build UnityPlugins/UnityPlugins.csproj
+
+      - name: Verify DLLs were generated
+        run: |
+          test -f Assets/Plugins/NLayer.dll || (echo "NLayer.dll missing" && exit 1)
+          test -f Assets/Plugins/SharpJaad.dll || (echo "SharpJaad.dll missing" && exit 1)
+          test -f Assets/Plugins/SharpJaad.AAC.dll || (echo "SharpJaad.AAC.dll missing" && exit 1)
+          echo "All plugins present"
