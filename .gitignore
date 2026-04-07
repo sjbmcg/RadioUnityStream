@@ -74,3 +74,14 @@ crashlytics-build.properties
 # StreamTester build output
 StreamTester/bin/
 StreamTester/obj/
+
+# NuGet-fetched plugin DLLs - run `dotnet build UnityPlugins/UnityPlugins.csproj` to populate
+Assets/Plugins/NLayer.dll
+Assets/Plugins/NLayer.dll.meta
+Assets/Plugins/SharpJaad.dll
+Assets/Plugins/SharpJaad.dll.meta
+Assets/Plugins/SharpJaad.AAC.dll
+Assets/Plugins/SharpJaad.AAC.dll.meta
+
+# UnityPlugins build output
+UnityPlugins/obj/
