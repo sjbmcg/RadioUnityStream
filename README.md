@@ -37,19 +37,11 @@ Adding more stations: add the URL and name to the `_urls` and `_stationNames` ar
 
 ---
 
-## Prerequisites
-
-- Unity 2021.3 or above
-- .NET SDK 8 or above (to restore the NuGet packages and copy the DLLs)
-- Active internet connection
-
----
-
-## Getting the DLLs
-
-The repo includes `UnityPlugins/UnityPlugins.csproj`, a small helper project whose only job is to fetch the right NuGet packages and drop the `netstandard2.0` DLLs into `Assets/Plugins/` automatically. You need the .NET SDK installed first.
+## Getting started
 
 ### 1. Install the .NET SDK
+
+You need this to fetch the audio decoding libraries. Skip if you already have it.
 
 **Windows**
 ```powershell
@@ -66,29 +58,34 @@ brew install dotnet
 sudo apt update && sudo apt install -y dotnet-sdk-8.0
 ```
 
-**Other Linux / manual download:** https://dotnet.microsoft.com/download
+**Other:** https://dotnet.microsoft.com/download
 
 ---
 
-### 2. Run the plugin fetcher
+### 2. Fetch the plugins
+
+From the repo root:
 
 ```bash
 dotnet build UnityPlugins/UnityPlugins.csproj
 ```
 
-That's it. `NLayer.dll`, `SharpJaad.dll`, and `SharpJaad.AAC.dll` will appear in `Assets/Plugins/`. Re-run any time you update package versions in the csproj.
-
-> **Why not NuGet inside Unity?** Unity's Mono runtime requires `netstandard2.0` builds. The `net8.0` variants NuGet normally resolves will cause a version conflict at compile time. The helper csproj targets `netstandard2.0` explicitly so the right builds are always selected.
+This creates `Assets/Plugins/` and drops the three required DLLs in automatically. You only need to run this once after cloning.
 
 ---
 
-## Setup
+### 3. Open in Unity
 
-1. Complete the DLL steps above so `Assets/Plugins/` contains all three DLLs
-2. Attach `RadioManager` to a GameObject
-3. Add an `AudioSource` component to the same GameObject and assign it in the Inspector
-4. Assign the `TMP_Dropdown` and `Slider` UI elements in the Inspector
-5. Hit Play - the dropdown populates with all stations automatically
+Open the project in Unity 2021.3 or above. Unity will detect the new DLLs and import them - you'll see them appear in `Assets/Plugins/` in the Project window.
+
+---
+
+### 4. Set up the scene
+
+1. Attach `RadioManager` to a GameObject
+2. Add an `AudioSource` to the same GameObject and assign it in the Inspector
+3. Assign a `TMP_Dropdown` and `Slider` in the Inspector
+4. Hit Play - the dropdown populates with all stations automatically
 
 ---
 
