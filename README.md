@@ -1,5 +1,7 @@
 # Unity Internet Radio Streaming
 
+[![Build](https://github.com/sjbmcg/RadioUnityStream/actions/workflows/build.yml/badge.svg)](https://github.com/sjbmcg/RadioUnityStream/actions/workflows/build.yml)
+
 Streams live internet radio inside Unity. Works on Windows, macOS, and Linux with no OS-level audio codecs required. Built entirely on pure C# libraries with no native dependencies.
 
 Supports **Icecast/SHOUTcast** streams (SomaFM, NPR etc.) and **HLS** streams (SomaFM, and more) out of the box.
