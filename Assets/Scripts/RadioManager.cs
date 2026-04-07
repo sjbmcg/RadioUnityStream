@@ -1,139 +1,147 @@
+using System;
 using System.Collections;
-using NAudio.Wave;
 using UnityEngine;
 using UnityEngine.UI;
 using TMPro;
 
 /// <summary>
-/// Manages radio functionality, including volume control and channel selection.
+/// Coordinates UI and radio stream lifecycle. Supports both Icecast (MP3) and HLS (BBC, NPR, etc.).
+/// URL ending in .m3u8 → HlsStream. Everything else → IcecastStream.
 /// </summary>
 public class RadioManager : MonoBehaviour
 {
-
-     /// <summary>
-    /// The UI Slider element for controlling volume.
-    /// </summary>
     public Slider volumeSlider;
+    public TMP_Dropdown radioDropdown;
+    public AudioSource audioSource;
 
-    /// <summary>
-    /// The UI Dropdown element for radio channel selection.
-    /// </summary>
-    public TMP_Dropdown radioDropdown; 
-
-     /// <summary>
-    /// Array of Icecast URLs for SomaFM radio channels.
-    /// </summary>
-    private string[] icecastUrls = {
-        "http://ice3.somafm.com/defcon-128-mp3",  // DEFCON Radio
-        "http://ice3.somafm.com/groovesalad-128-mp3",  // Groove Salad
-        "http://ice3.somafm.com/dronezone-128-mp3",  // Drone Zone
-        "http://ice3.somafm.com/indiepop-128-mp3"  // Indie Pop Rocks!
-        // Add more URLs here
+    private readonly string[] _stationNames = {
+        "DEFCON Radio",
+        "Groove Salad",
+        "Drone Zone",
+        "Indie Pop Rocks!",
+        "BBC Radio 1",
+        "BBC Radio 2",
+        "BBC Radio 3",
+        "BBC Radio 4",
+        "BBC Radio 5 Live",
+        "BBC Radio 6 Music",
+        "BBC World Service"
     };
 
-    /// <summary>
-    /// The MediaFoundationReader for audio processing.
-    /// </summary>
-    private MediaFoundationReader mediaFoundationReader;
+    private readonly string[] _urls = {
+        // Icecast (SomaFM)
+        "http://ice3.somafm.com/defcon-128-mp3",
+        "http://ice3.somafm.com/groovesalad-128-mp3",
+        "http://ice3.somafm.com/dronezone-128-mp3",
+        "http://ice3.somafm.com/indiepop-128-mp3",
+        // BBC Radio (HLS via lsn.lv proxy — BBC changes direct URLs frequently)
+        "https://lsn.lv/bbcradio.m3u8?station=bbc_radio_one&bitrate=320000",
+        "https://lsn.lv/bbcradio.m3u8?station=bbc_radio_two&bitrate=320000",
+        "https://lsn.lv/bbcradio.m3u8?station=bbc_radio_three&bitrate=320000",
+        "https://lsn.lv/bbcradio.m3u8?station=bbc_radio_fourfm&bitrate=320000",
+        "https://lsn.lv/bbcradio.m3u8?station=bbc_radio_five_live&bitrate=320000",
+        "https://lsn.lv/bbcradio.m3u8?station=bbc_6music&bitrate=320000",
+        "https://lsn.lv/bbcradio.m3u8?station=bbc_world_service&bitrate=320000"
+    };
 
-      /// <summary>
-    /// The WaveOutEvent for audio output.
-    /// </summary>
-    private WaveOutEvent waveOut;
+    private IRadioStream _stream;
 
     void Start()
     {
-     
         if (volumeSlider != null)
         {
-            volumeSlider.value = 1f; 
-            volumeSlider.onValueChanged.AddListener(SetVolume);
+            volumeSlider.value = 1f;
+            volumeSlider.onValueChanged.AddListener(v => { if (_stream != null) _stream.Volume = v; });
         }
 
-     
         if (radioDropdown != null)
         {
-            radioDropdown.onValueChanged.AddListener(ChangeRadioStation);
-            radioDropdown.value = 0; 
+            radioDropdown.ClearOptions();
+            radioDropdown.AddOptions(new System.Collections.Generic.List<string>(_stationNames));
+            radioDropdown.onValueChanged.AddListener(ChangeStation);
+            radioDropdown.value = 0;
         }
 
-        
-        StartCoroutine(PlayRadio(icecastUrls[0]));
+        StartCoroutine(PlayStream(_urls[0]));
     }
 
-    private IEnumerator PlayRadio(string url)
+    void Update()
     {
-        yield return null; 
-        try
-        {
-            mediaFoundationReader = new MediaFoundationReader(url);
-            waveOut = new WaveOutEvent();
-            waveOut.Init(mediaFoundationReader);
-            waveOut.Play();
-        }
-        catch (System.Exception ex)
-        {
-            Debug.LogError($"Error playing radio: {ex.Message}");
-        }
+        // IcecastStream surfaces background-thread errors here on the main thread
+        (_stream as IcecastStream)?.FlushErrors();
     }
 
     void OnDestroy()
     {
-        if (waveOut != null)
-        {
-            waveOut.Stop();
-            waveOut.Dispose();
-        }
-
-        if (mediaFoundationReader != null)
-        {
-            mediaFoundationReader.Dispose();
-        }
+        _stream?.Stop();
+        _stream?.Dispose();
     }
 
-    public void StopRadio()
+    private IEnumerator PlayStream(string url)
     {
-        if (waveOut != null)
-        {
-            waveOut.Stop();
-        }
-    }
+        _stream?.Stop();
+        _stream?.Dispose();
+        _stream = null;
 
-    public void SetVolume(float volume)
-    {
-        if (waveOut != null)
+        if (url.IndexOf(".m3u8", StringComparison.OrdinalIgnoreCase) >= 0)
         {
-            waveOut.Volume = Mathf.Clamp01(volume);
+            yield return StartCoroutine(PlayHls(url));
+        }
+        else
+        {
+            yield return StartCoroutine(PlayIcecast(url));
         }
     }
 
-    public float GetVolume()
+    private IEnumerator PlayIcecast(string url)
     {
-        return waveOut != null ? waveOut.Volume : 0;
+        var stream = new IcecastStream(audioSource);
+        stream.OnError += e => Debug.LogError($"[Radio] {e}");
+        _stream = stream;
+
+        stream.Play(url);
+
+        yield return new WaitUntil(() => stream.HeadersReady);
+
+        if (stream.InitError != null)
+        {
+            Debug.LogError($"[Radio] Failed to connect: {stream.InitError}");
+            yield break;
+        }
+
+        // AudioClip must be created on the main thread
+        var clip = AudioClip.Create(
+            "IcecastStream",
+            stream.SampleRate * stream.Channels,
+            stream.Channels,
+            stream.SampleRate,
+            true,
+            stream.OnAudioRead);
+
+        audioSource.clip = clip;
+        audioSource.loop = true;
+
+        yield return new WaitUntil(() => stream.IsReady);
+        audioSource.Play();
     }
 
-
-    // Do this shit later
-   public void ChangeRadioStation(int dropdownIndex)
-{
-    if (dropdownIndex < 0 || dropdownIndex >= icecastUrls.Length)
+    private IEnumerator PlayHls(string url)
     {
-        Debug.LogError("Invalid dropdown index");
-        return;
+        var stream = new HlsStream(audioSource, this);
+        stream.OnError += e => Debug.LogError($"[Radio] {e}");
+        _stream = stream;
+
+        stream.Play(url); // non-blocking; creates AudioClip internally with fixed 44100/stereo
+        yield return new WaitUntil(() => stream.IsReady);
     }
 
-    // Stop the current radio station and then play the new one after a delay
-    StartCoroutine(ChangeRadioStationWithDelay(dropdownIndex));
-}
-
-private IEnumerator ChangeRadioStationWithDelay(int dropdownIndex)
-{
-    // Stop the current radio station
-    StopRadio();
-
-    yield return new WaitForSeconds(0.1f); // Wait for 100 milliseconds
-
-    // Start playing the new radio station
-    StartCoroutine(PlayRadio(icecastUrls[dropdownIndex]));
-}
+    public void ChangeStation(int index)
+    {
+        if (index < 0 || index >= _urls.Length)
+        {
+            Debug.LogError($"[Radio] Invalid station index: {index}");
+            return;
+        }
+        StartCoroutine(PlayStream(_urls[index]));
+    }
 }
