@@ -1,11 +1,9 @@
 using System;
-using System.Collections;
 using System.Collections.Generic;
 using System.IO;
 using System.Net.Http;
 using System.Threading;
 using UnityEngine;
-using UnityEngine.Networking;
 using NLayer;
 
 public class HlsStream : IRadioStream
@@ -26,21 +24,20 @@ public class HlsStream : IRadioStream
     public bool IsReady => _ringBuffer != null && _ringBuffer.Available >= _minBufferSamples;
 
     private readonly AudioSource _audioSource;
-    private readonly MonoBehaviour _runner;
-    private SampleRingBuffer _ringBuffer;
+    private readonly SynchronizationContext _mainThread;
+    private volatile SampleRingBuffer _ringBuffer;
     private Thread _streamThread;
     private CancellationTokenSource _cts;
     private float _volume = 1f;
-    private int _minBufferSamples;
-    private const int SampleRate = 44100;
-    private const int Channels = 2;
+    private volatile int _minBufferSamples;
     private const int RingBufferSeconds = 20;
     private const int ReadyBufferSeconds = 2;
+    private const int PlaylistRetryDelayMs = 3000;
 
-    public HlsStream(AudioSource audioSource, MonoBehaviour coroutineRunner)
+    public HlsStream(AudioSource audioSource)
     {
         _audioSource = audioSource;
-        _runner = coroutineRunner;
+        _mainThread = SynchronizationContext.Current;
     }
 
     public void Play(string url)
@@ -48,15 +45,6 @@ public class HlsStream : IRadioStream
         Stop();
 
         _cts = new CancellationTokenSource();
-        _ringBuffer = new SampleRingBuffer(SampleRate * Channels * RingBufferSeconds);
-        _minBufferSamples = SampleRate * Channels * ReadyBufferSeconds;
-
-        var clip = AudioClip.Create("HlsStream", SampleRate * Channels, Channels, SampleRate, true, OnAudioRead);
-        _audioSource.clip = clip;
-        _audioSource.loop = true;
-        _audioSource.volume = Mathf.Clamp01(_volume);
-        _audioSource.Play();
-
         var token = _cts.Token;
         _streamThread = new Thread(() => StreamLoop(url, token)) { IsBackground = true };
         _streamThread.Start();
@@ -83,47 +71,60 @@ public class HlsStream : IRadioStream
 
     public void Dispose() => Stop();
 
-    // -------------------------------------------------------------------------
+    // ── Stream loop ───────────────────────────────────────────────────────────
 
     private void StreamLoop(string url, CancellationToken token)
     {
         try
         {
             using var client = new HttpClient { Timeout = TimeSpan.FromSeconds(15) };
+            client.DefaultRequestHeaders.Add("User-Agent", "Mozilla/5.0 (compatible; RadioUnityStream/1.0)");
 
             string playlistUrl = url;
-            string masterM3u8 = Fetch(client, url, token);
+            var (masterM3u8, masterFinalUrl) = Fetch(client, url, token);
 
             if (masterM3u8.Contains("#EXT-X-STREAM-INF"))
             {
-                var variants = HlsPlaylist.ParseMaster(masterM3u8, url);
-                if (variants.Count == 0) { RaiseError("No variants in master playlist"); return; }
+                var variants = HlsPlaylist.ParseMaster(masterM3u8, masterFinalUrl);
+                if (variants.Count == 0) { RaiseError("No variants in master playlist."); return; }
                 variants.Sort((a, b) => b.Bandwidth.CompareTo(a.Bandwidth));
                 playlistUrl = variants[0].Url;
             }
 
+            var fmp4Decoder = new FMp4Decoder();
+            var tsDecoder   = new TsAudioDecoder();
+            byte[] initBytes = null;
             var seenSequences = new HashSet<int>();
 
             while (!token.IsCancellationRequested)
             {
                 string mediaM3u8;
-                try { mediaM3u8 = Fetch(client, playlistUrl, token); }
+                string mediaFinalUrl;
+                try { (mediaM3u8, mediaFinalUrl) = Fetch(client, playlistUrl, token); }
                 catch (Exception ex)
                 {
                     if (token.IsCancellationRequested) return;
                     RaiseError($"Playlist fetch error: {ex.Message}");
-                    Thread.Sleep(3000);
+                    Thread.Sleep(PlaylistRetryDelayMs);
                     continue;
                 }
 
-                var playlist = HlsPlaylist.ParseMedia(mediaM3u8, playlistUrl);
+                var playlist = HlsPlaylist.ParseMedia(mediaM3u8, mediaFinalUrl);
+
+                // fMP4/CMAF: download init segment once to configure decoder + AudioClip.
+                if (playlist.InitUrl != null && initBytes == null)
+                {
+                    initBytes = client.GetByteArrayAsync(playlist.InitUrl).GetAwaiter().GetResult();
+                    fmp4Decoder.LoadInitSegment(initBytes);
+                    SetupAudioClip(fmp4Decoder.SampleRate, fmp4Decoder.Channels, token);
+                }
 
                 foreach (var seg in playlist.Segments)
                 {
                     if (token.IsCancellationRequested) return;
                     if (!seenSequences.Add(seg.Sequence)) continue;
 
-                    try { DownloadAndDecodeSegment(client, seg, token); }
+                    try { DownloadAndDecodeSegment(client, seg, fmp4Decoder, tsDecoder, token); }
                     catch (OperationCanceledException) { return; }
                     catch (Exception ex)
                     {
@@ -133,31 +134,60 @@ public class HlsStream : IRadioStream
                 }
 
                 if (!playlist.IsLive) break;
-
-                int pollMs = Math.Max(playlist.TargetDuration, 1) * 1000;
-                WaitOrCancel(token, pollMs);
+                WaitOrCancel(token, Math.Max(playlist.TargetDuration, 1) * 1000);
             }
         }
         catch (OperationCanceledException) { }
         catch (Exception ex)
         {
-            if (!token.IsCancellationRequested)
-                RaiseError(ex.Message);
+            if (!token.IsCancellationRequested) RaiseError(ex.Message);
         }
     }
 
-    private void DownloadAndDecodeSegment(HttpClient client, HlsSegment seg, CancellationToken token)
+    private void SetupAudioClip(int sampleRate, int channels, CancellationToken token)
     {
-        bool isAac = seg.Url.Contains(".aac", StringComparison.OrdinalIgnoreCase) ||
-                     seg.Url.Contains(".ts", StringComparison.OrdinalIgnoreCase);
+        _ringBuffer = new SampleRingBuffer(sampleRate * channels * RingBufferSeconds);
+        _minBufferSamples = sampleRate * channels * ReadyBufferSeconds;
 
-        if (isAac)
+        using var clipReady = new ManualResetEventSlim(false);
+        _mainThread.Post(_ =>
         {
-            DecodeAacViaCoroutine(seg.Url, token);
+            var clip = AudioClip.Create("HlsStream", sampleRate * channels, channels, sampleRate, true, OnAudioRead);
+            _audioSource.clip = clip;
+            _audioSource.loop = true;
+            _audioSource.volume = Mathf.Clamp01(_volume);
+            _audioSource.Play();
+            clipReady.Set();
+        }, null);
+        clipReady.Wait(token);
+    }
+
+    private void DownloadAndDecodeSegment(HttpClient client, HlsSegment seg,
+        FMp4Decoder fmp4Decoder, TsAudioDecoder tsDecoder, CancellationToken token)
+    {
+        byte[] data = client.GetByteArrayAsync(seg.Url).GetAwaiter().GetResult();
+
+        if (fmp4Decoder.Initialised && !seg.Url.Contains(".mp3", StringComparison.OrdinalIgnoreCase))
+        {
+            // fMP4/CMAF — AudioClip already set up from init segment
+            float[] samples = fmp4Decoder.DecodeSegment(data);
+            if (samples.Length > 0)
+                _ringBuffer?.Write(samples, 0, samples.Length);
+        }
+        else if (TsAudioDecoder.IsTsData(data))
+        {
+            // MPEG-TS — decode first; AudioClip set up once we know the actual sample rate
+            float[] samples = tsDecoder.DecodeSegment(data);
+            if (_ringBuffer == null && tsDecoder.Initialised)
+                SetupAudioClip(tsDecoder.SampleRate, tsDecoder.Channels, token);
+            if (samples.Length > 0)
+                _ringBuffer?.Write(samples, 0, samples.Length);
         }
         else
         {
-            byte[] data = client.GetByteArrayAsync(seg.Url).GetAwaiter().GetResult();
+            // MP3 fallback (explicit .mp3 segments or unknown format)
+            if (_ringBuffer == null)
+                SetupAudioClip(44100, 2, token);
             DecodeMp3(data);
         }
     }
@@ -165,69 +195,26 @@ public class HlsStream : IRadioStream
     private void DecodeMp3(byte[] data)
     {
         using var ms = new MemoryStream(data);
-        using var tracked = new PositionTrackingStream(ms);
-        using var mpeg = new MpegFile(tracked);
-
+        using var mpeg = new MpegFile(new PositionTrackingStream(ms));
         var buf = new float[4096];
         int count;
         while ((count = mpeg.ReadSamples(buf, 0, buf.Length)) > 0)
             _ringBuffer?.Write(buf, 0, count);
     }
 
-    private void DecodeAacViaCoroutine(string url, CancellationToken token)
-    {
-        float[] samples = null;
-        string error = null;
-        var done = new ManualResetEventSlim(false);
-
-        _runner.StartCoroutine(FetchAudioClip(url, result => samples = result, err => error = err, done));
-
-        done.Wait(token);
-
-        if (error != null)
-            throw new Exception(error);
-
-        if (samples != null && samples.Length > 0)
-            _ringBuffer?.Write(samples, 0, samples.Length);
-    }
-
-    private static IEnumerator FetchAudioClip(string url, Action<float[]> onSamples, Action<string> onError, ManualResetEventSlim done)
-    {
-        using var req = UnityWebRequestMultimedia.GetAudioClip(url, AudioType.UNKNOWN);
-        yield return req.SendWebRequest();
-
-        if (req.result != UnityWebRequest.Result.Success)
-        {
-            onError(req.error);
-            done.Set();
-            yield break;
-        }
-
-        var clip = DownloadHandlerAudioClip.GetContent(req);
-        if (clip == null)
-        {
-            onError("Null AudioClip from UnityWebRequest");
-            done.Set();
-            yield break;
-        }
-
-        var samples = new float[clip.samples * clip.channels];
-        clip.GetData(samples, 0);
-        onSamples(samples);
-        done.Set();
-    }
-
-    private static string Fetch(HttpClient client, string url, CancellationToken token)
+    // Returns (content, finalUrl) — finalUrl is the URL after any HTTP redirects,
+    // which is the correct base for resolving relative segment/init paths.
+    private static (string Content, string FinalUrl) Fetch(HttpClient client, string url, CancellationToken token)
     {
         var response = client.GetAsync(url, token).GetAwaiter().GetResult();
         response.EnsureSuccessStatusCode();
-        return response.Content.ReadAsStringAsync().GetAwaiter().GetResult();
+        string content = response.Content.ReadAsStringAsync().GetAwaiter().GetResult();
+        string finalUrl = response.RequestMessage?.RequestUri?.ToString() ?? url;
+        return (content, finalUrl);
     }
 
-    private static void WaitOrCancel(CancellationToken token, int ms)
-    {
+    private static void WaitOrCancel(CancellationToken token, int ms) =>
         token.WaitHandle.WaitOne(ms);
-    }
 
     private void RaiseError(string message)
     {

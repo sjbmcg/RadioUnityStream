@@ -8,6 +8,7 @@ public class IcecastStream : IRadioStream
 {
     private const int RingBufferSeconds = 10;
     private const int PreBufferSeconds = 2;
+    private const int ReconnectDelayMs = 2000;
 
     private readonly AudioSource _audioSource;
 
@@ -17,11 +18,12 @@ public class IcecastStream : IRadioStream
     private ManualResetEventSlim _headerReady;
 
     private string _pendingError;
-    private string _initError;
-    private int _sampleRate;
-    private int _channels;
+    private volatile string _initError;
+    private volatile int _sampleRate;
+    private volatile int _channels;
+    private volatile bool _isReady;
 
-    public bool IsReady { get; private set; }
+    public bool IsReady => _isReady;
     public bool HeadersReady => _headerReady?.IsSet ?? false;
     public int SampleRate => _sampleRate;
     public int Channels => _channels;
@@ -44,7 +46,7 @@ public class IcecastStream : IRadioStream
     {
         Stop();
 
-        IsReady = false;
+        _isReady = false;
         _initError = null;
         _pendingError = null;
         _headerReady = new ManualResetEventSlim(false);
@@ -73,7 +75,6 @@ public class IcecastStream : IRadioStream
                         _sampleRate = mpegFile.SampleRate;
                         _channels = mpegFile.Channels;
                         _ringBuffer = new SampleRingBuffer(_sampleRate * _channels * RingBufferSeconds);
-                        Thread.MemoryBarrier();
                         _headerReady.Set();
                     }
 
@@ -86,8 +87,8 @@ public class IcecastStream : IRadioStream
                         if (count == 0) break;
                         _ringBuffer.Write(decodeBuffer, 0, count);
 
-                        if (!IsReady && _ringBuffer.Available >= preBufferSamples)
-                            IsReady = true;
+                        if (!_isReady && _ringBuffer.Available >= preBufferSamples)
+                            _isReady = true;
                     }
                 }
                 catch (OperationCanceledException) { break; }
@@ -103,7 +104,7 @@ public class IcecastStream : IRadioStream
                     }
 
                     Interlocked.Exchange(ref _pendingError, $"Stream dropped, reconnecting: {ex.Message}");
-                    Thread.Sleep(2000);
+                    Thread.Sleep(ReconnectDelayMs);
                 }
             }
         });
@@ -133,7 +134,9 @@ public class IcecastStream : IRadioStream
         _streamThread?.Join(500);
         _streamThread = null;
         _ringBuffer = null;
-        IsReady = false;
+        _isReady = false;
+        _headerReady?.Dispose();
+        _headerReady = null;
 
         if (_audioSource != null)
             _audioSource.Stop();

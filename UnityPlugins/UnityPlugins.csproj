@@ -1,0 +1,43 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    This project exists solely to fetch NuGet packages and copy the correct
+    netstandard2.0 DLLs into Assets/Plugins/ for Unity.
+
+    Usage:
+      dotnet build UnityPlugins/UnityPlugins.csproj
+
+    Do NOT reference this project from the Unity project — it is a build tool only.
+  -->
+
+  <PropertyGroup>
+    <TargetFramework>netstandard2.0</TargetFramework>
+    <!-- Output directly into Assets/Plugins so Unity picks them up immediately -->
+    <OutputPath>../Assets/Plugins/</OutputPath>
+    <!-- Copy NuGet package DLLs (not just the project's own output) to OutputPath -->
+    <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
+    <!-- Suppress the default app host / runtimes output that would confuse Unity -->
+    <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
+    <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
+    <NoWarn>NU1701;CS2008</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="NLayer"                        Version="1.16.0" />
+    <PackageReference Include="SharpJaad"                     Version="0.1.1"  />
+    <PackageReference Include="SharpJaad.AAC"                 Version="0.1.1"  />
+  </ItemGroup>
+
+  <!-- Remove everything except the DLLs Unity needs -->
+  <Target Name="CleanPluginsOutput" AfterTargets="Build">
+    <ItemGroup>
+      <FilesToRemove Include="$(OutputPath)*"
+                     Exclude="$(OutputPath)NLayer.dll;
+                              $(OutputPath)SharpJaad.dll;
+                              $(OutputPath)SharpJaad.AAC.dll;
+                $(OutputPath)*.meta" />
+    </ItemGroup>
+    <Delete Files="@(FilesToRemove)" />
+  </Target>
+
+</Project>

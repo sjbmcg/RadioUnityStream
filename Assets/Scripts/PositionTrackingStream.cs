@@ -29,4 +29,10 @@ public class PositionTrackingStream : Stream
     public override void SetLength(long value) => throw new NotSupportedException();
     public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
     public override void Flush() { }
+
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing) _inner?.Dispose();
+        base.Dispose(disposing);
+    }
 }

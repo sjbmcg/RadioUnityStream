@@ -15,33 +15,29 @@ public class RadioManager : MonoBehaviour
     public AudioSource audioSource;
 
     private readonly string[] _stationNames = {
+        // Icecast — SomaFM
         "DEFCON Radio",
         "Groove Salad",
         "Drone Zone",
         "Indie Pop Rocks!",
-        "BBC Radio 1",
-        "BBC Radio 2",
-        "BBC Radio 3",
-        "BBC Radio 4",
-        "BBC Radio 5 Live",
-        "BBC Radio 6 Music",
-        "BBC World Service"
+        // Icecast — NPR / KUT Austin
+        "KUT News (NPR)",
+        "KUTX (NPR Music)",
+        // HLS — SomaFM Groove Salad (only channel SomaFM offers via HLS; 320k requires subscription)
+        "Groove Salad (HLS 128k)",
     };
 
     private readonly string[] _urls = {
-        // Icecast (SomaFM)
+        // Icecast — SomaFM
         "http://ice3.somafm.com/defcon-128-mp3",
         "http://ice3.somafm.com/groovesalad-128-mp3",
         "http://ice3.somafm.com/dronezone-128-mp3",
         "http://ice3.somafm.com/indiepop-128-mp3",
-        // BBC Radio (HLS via lsn.lv proxy — BBC changes direct URLs frequently)
-        "https://lsn.lv/bbcradio.m3u8?station=bbc_radio_one&bitrate=320000",
-        "https://lsn.lv/bbcradio.m3u8?station=bbc_radio_two&bitrate=320000",
-        "https://lsn.lv/bbcradio.m3u8?station=bbc_radio_three&bitrate=320000",
-        "https://lsn.lv/bbcradio.m3u8?station=bbc_radio_fourfm&bitrate=320000",
-        "https://lsn.lv/bbcradio.m3u8?station=bbc_radio_five_live&bitrate=320000",
-        "https://lsn.lv/bbcradio.m3u8?station=bbc_6music&bitrate=320000",
-        "https://lsn.lv/bbcradio.m3u8?station=bbc_world_service&bitrate=320000"
+        // Icecast — NPR / KUT Austin
+        "https://streams.kut.org/4426_128.mp3?aw_0_1st.playerid=kut-free",
+        "https://streams.kut.org/4428_192.mp3?aw_0_1st.playerid=kutx-free",
+        // HLS — SomaFM Groove Salad 128k (320k requires a paid subscription)
+        "https://hls.somafm.com/hls/groovesalad/128k/program.m3u8",
     };
 
     private IRadioStream _stream;
@@ -127,7 +123,7 @@ public class RadioManager : MonoBehaviour
 
     private IEnumerator PlayHls(string url)
     {
-        var stream = new HlsStream(audioSource, this);
+        var stream = new HlsStream(audioSource);
         stream.OnError += e => Debug.LogError($"[Radio] {e}");
         _stream = stream;
 
